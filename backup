@@ -1,0 +1,371 @@
+// =====================================================================
+// // 🛡️ ANTI-HACKER BRABO
+// =====================================================================
+const { default: makeWASocket, useMultiFileAuthState, isJidGroup, fetchLatestBaileysVersion, DisconnectReason } = require('@whiskeysockets/baileys');
+const pino = require('pino');
+const readline = require('readline');
+const fs = require('fs'); 
+// 🤫 SILENCIADOR DE LIXO CRIPTOGRÁFICO
+const consoleLogOriginal = console.log;
+const consoleInfoOriginal = console.info;
+console.log = function (...args) {
+    if (typeof args[0] === 'string' && args[0].includes('Closing session: SessionEntry')) return;
+    consoleLogOriginal.apply(console, args);
+};
+console.info = function (...args) {
+    if (typeof args[0] === 'string' && args[0].includes('Closing session: SessionEntry')) return;
+    consoleInfoOriginal.apply(console, args);
+};
+
+process.on('uncaughtException', err => console.error('\n[💀 ERRO FATAL]', err));
+process.on('unhandledRejection', err => console.error('\n[💀 REJEIÇÃO]', err));
+
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const question = (text) => new Promise((resolve) => rl.question(text, resolve));
+
+// =================================================================
+// ⚙️ PAINEL DE CONTROLE
+// =================================================================
+const WHITELIST_REMETENTES = [
+    '5516994338228', 
+    '5516993436558',
+    '5516992027254'
+];
+const QTD_ESPIOES = 1; 
+
+const ARQUIVO_BLACKLIST = './blacklist_aegis.json';
+const ultimasAmeacas = new Set(); 
+const cacheGrupos = {}; 
+const pendingMetadata = {}; 
+
+function carregarBlacklist() {
+    if (!fs.existsSync(ARQUIVO_BLACKLIST)) fs.writeFileSync(ARQUIVO_BLACKLIST, JSON.stringify([])); 
+    return JSON.parse(fs.readFileSync(ARQUIVO_BLACKLIST));
+}
+
+function normalizarID(jid) {
+    if (!jid) return "";
+    let num = String(jid).split('@')[0].split(':')[0].replace(/\D/g, ''); 
+    if (num.startsWith('55')) num = num.substring(2); 
+    if (num.length === 11 && num[2] === '9') num = num.substring(0, 2) + num.substring(3); 
+    return num; 
+}
+
+function adicionarNaBlacklist(jid) {
+    const lista = carregarBlacklist();
+    const idNorm = normalizarID(jid);
+    let atualizou = false;
+
+    if (!lista.includes(jid)) { lista.push(jid); atualizou = true; }
+    if (idNorm && !lista.includes(idNorm)) { lista.push(idNorm); atualizou = true; }
+
+    if (atualizou) {
+        fs.writeFileSync(ARQUIVO_BLACKLIST, JSON.stringify(lista, null, 2));
+        console.log(`[💾 BLACKLIST] Invasor cravado no banco de dados com sucesso.`);
+    }
+}
+
+let sockSniper;
+let frotaEspioes = []; 
+let codigoSniperSolicitado = false;
+
+// =================================================================
+// PASSO 1: INICIAR O SNIPER (NÓ DE ARTILHARIA)
+// =================================================================
+async function iniciarSniper() {
+    const authSniper = await useMultiFileAuthState('auth_sniper');
+    let numeroSniper = "";
+
+    if (!authSniper.state.creds.registered) {
+        numeroSniper = await question('\n[?] NOVO LOGIN. Digite o NÚMERO DO ADMIN (Com 55! Ex: 5516999999999): ');
+        numeroSniper = numeroSniper.replace(/\D/g, '');
+    }
+    return new Promise((resolve) => conectarSniperNode(numeroSniper, authSniper, resolve));
+}
+
+async function conectarSniperNode(numeroSniper, authSniper, resolve) {
+    const { version } = await fetchLatestBaileysVersion();
+    sockSniper = makeWASocket({
+        version, auth: authSniper.state, printQRInTerminal: false, logger: pino({ level: 'silent' }), browser: ['Mac OS', 'Chrome', '121.0.0.0'], markOnlineOnConnect: true
+    });
+    sockSniper.ev.on('creds.update', authSniper.saveCreds);
+    
+    sockSniper.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+        if (connection === 'close' && lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
+            conectarSniperNode(numeroSniper, authSniper, resolve); 
+        }
+        if (qr && !sockSniper.authState.creds.registered && !codigoSniperSolicitado) {
+            codigoSniperSolicitado = true;
+            try { const code = await sockSniper.requestPairingCode(numeroSniper); console.log(`\n[🔑] CÓDIGO DO SNIPER: ${code}`); } catch (err) {}
+        }
+        if (connection === 'open') {
+            console.log('[✅] Sniper Online.'); resolve(); 
+        }
+    });
+
+    // =================================================================
+    // 🛑 CATRACA DE FERRO V4: Deep Scan + Blindagem de Tipagem
+    // =================================================================
+    sockSniper.ev.on('group-participants.update', async (evento) => {
+        if (evento.action === 'add') {
+            const blacklist = carregarBlacklist();
+            console.log(`\n[🚪 MONITORAMENTO] Movimento detectado na porta!`);
+            
+            for (let novato of evento.participants) {
+                
+                // 🛡️ MÓDULO DE BLINDAGEM DE TIPO (Resolve o erro do .split)
+                // Se a Meta mandar um objeto maluco, nós extraímos o ID à força
+                if (typeof novato === 'object' && novato !== null) {
+                    novato = novato.id || novato.jid || "";
+                }
+                if (!novato) continue;
+                novato = String(novato); // Força a variável a se comportar como Texto (String)
+
+                const idNorm = normalizarID(novato);
+                const numPuro = novato.split('@')[0].split(':')[0]; 
+                
+                console.log(` 🔎 Escaneando ID WhatsAPP: ${numPuro}...`);
+
+                const ehInimigo = blacklist.some(b => {
+                    return b === novato || 
+                           b.includes(numPuro) || 
+                           normalizarID(b) === idNorm;
+                });
+
+                if (ehInimigo) {
+                    console.log(`[🛑 ALERTA] Invasor da Blacklist reconhecido! Preparando guilhotina...`);
+                    
+                    setTimeout(async () => {
+                        try {
+                            await sockSniper.groupParticipantsUpdate(evento.id, [novato], "remove");
+                            console.log(`[✅ EJETADO] Invasor chutado para fora da porta com sucesso.`);
+                        } catch (err) {
+                            console.error(`[❌ FALHA] Erro ao ejetar na porta. O Sniper é Admin neste grupo?`);
+                        }
+                    }, 1500); 
+
+                } else {
+                    console.log(` 🟩 Acesso Liberado para visitante.`);
+                }
+            }
+        }
+    });
+}
+
+// =================================================================
+// PASSO 2: FÁBRICA DE OLHEIROS (O MICRO-ENXAME)
+// =================================================================
+async function iniciarEspiao(indice) {
+    const authSpotter = await useMultiFileAuthState(`auth_spotter_${indice}`);
+    let numeroSpotter = "";
+
+    if (!authSpotter.state.creds.registered) {
+        numeroSpotter = await question(`\n[?] NOVO LOGIN. Digite o NÚMERO DO ESPIÃO 0${indice}: `);
+        numeroSpotter = numeroSpotter.replace(/\D/g, '');
+    }
+    return new Promise((resolve) => conectarEspiaoNode(indice, numeroSpotter, authSpotter, resolve));
+}
+
+async function conectarEspiaoNode(indice, numeroSpotter, authSpotter, resolve) {
+    const { version } = await fetchLatestBaileysVersion();
+    let codigoSolicitado = false;
+    
+    const sockEspiao = makeWASocket({
+        version, auth: authSpotter.state, printQRInTerminal: false, logger: pino({ level: 'silent' }), browser: ['Mac OS', 'Chrome', '121.0.0.0'], markOnlineOnConnect: true
+    });
+    
+    frotaEspioes[indice - 1] = sockEspiao; 
+
+    sockEspiao.ev.on('creds.update', authSpotter.saveCreds);
+    sockEspiao.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+        if (connection === 'close' && lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
+            conectarEspiaoNode(indice, numeroSpotter, authSpotter, resolve); 
+        }
+        if (qr && !sockEspiao.authState.creds.registered && !codigoSolicitado) {
+            codigoSolicitado = true;
+            try { const code = await sockEspiao.requestPairingCode(numeroSpotter); console.log(`\n[🔑] CÓDIGO DO ESPIÃO 0${indice}: ${code}`); } catch (err) {}
+        }
+        if (connection === 'open') {
+            console.log(`[✅] Espião 0${indice} Infiltrado.`);
+            resolve();
+        }
+    });
+
+    // =================================================================
+    // 🛡️ INTEGRAÇÃO TÁTICA: DPI + EXPURGO GLOBAL (ORDEM 66)
+    // =================================================================
+    sockEspiao.ev.on('messages.upsert', async ({ messages, type }) => {
+        if (type !== 'notify') return; 
+
+        for (const msg of messages) {
+            if (!msg.message || !msg.key || msg.key.fromMe) continue; 
+
+            const chavesInternas = Object.keys(msg.message || {});
+            const chavesVisiveis = chavesInternas.filter(k => 
+                k !== 'senderKeyDistributionMessage' && 
+                k !== 'messageContextInfo' && 
+                k !== 'protocolMessage'
+            );
+
+            if (chavesVisiveis.length === 0) continue; 
+
+            const chatId = msg.key.remoteJid;
+            const senderId = msg.key.participant || msg.key.remoteJid;
+            if (senderId === chatId) continue;
+
+            if (isJidGroup(chatId)) {
+                
+                if (ultimasAmeacas.has(msg.key.id)) continue;
+
+                // 1. FILTRO VIP
+                const idAlvoNorm = normalizarID(senderId);
+                const whitelist = WHITELIST_REMETENTES.map(normalizarID);
+                const idSniper = normalizarID(sockSniper?.user?.id);
+                const idsFrota = frotaEspioes.map(espiao => normalizarID(espiao?.user?.id));
+                const listaSegura = [...whitelist, idSniper, ...idsFrota].filter(Boolean);
+
+                if (listaSegura.includes(idAlvoNorm)) continue; 
+
+                // 2. SISTEMA DE PATENTE
+                let isAdmin = false;
+                let nomeGrupo = chatId;
+                const agora = Date.now();
+
+                if (!cacheGrupos[chatId] || agora - cacheGrupos[chatId].tempo > 60000) {
+                    if (!pendingMetadata[chatId]) {
+                        pendingMetadata[chatId] = sockSniper.groupMetadata(chatId)
+                            .then(metadata => {
+                                cacheGrupos[chatId] = { dados: metadata, tempo: Date.now() };
+                                delete pendingMetadata[chatId]; 
+                            })
+                            .catch(e => { delete pendingMetadata[chatId]; });
+                    }
+                    await pendingMetadata[chatId]; 
+                }
+
+                if (cacheGrupos[chatId]) {
+                    nomeGrupo = cacheGrupos[chatId].dados.subject || chatId;
+                    const participante = cacheGrupos[chatId].dados.participants.find(p => p.id === senderId || normalizarID(p.id) === idAlvoNorm);
+                    if (participante && (participante.admin === 'admin' || participante.admin === 'superadmin')) {
+                        isAdmin = true;
+                    }
+                }
+
+                if (isAdmin) continue; 
+
+                // ==========================================
+                // RELATÓRIO DE ANULAÇÃO: ORDEM 66
+                // ==========================================
+                ultimasAmeacas.add(msg.key.id);
+                setTimeout(() => ultimasAmeacas.delete(msg.key.id), 10000); 
+
+                console.log(`\n[💀 ALERTA MÁXIMO (DPI ATIVADO)]`);
+                console.log(`📍 Origem : ${nomeGrupo}`);
+                console.log(`👤 Alvo   : ${idAlvoNorm}`);
+                console.log(`⚙️  Ação   : Executando Protocolo Expurgo Global...`);
+                
+                try {
+                    // 1. Apaga a mensagem
+                    await sockSniper.sendMessage(chatId, { delete: { remoteJid: chatId, id: msg.key.id, participant: senderId } });
+                    
+                    // 2. Crava na Blacklist
+                    adicionarNaBlacklist(senderId);
+
+                    // 3. EXECUTA A ORDEM 66
+                    const todosOsGrupos = await sockSniper.groupFetchAllParticipating();
+                    let banimentos = 0;
+
+                    for (const idGrupo in todosOsGrupos) {
+                        const grupoAlvo = todosOsGrupos[idGrupo];
+                        const alvoEscondido = grupoAlvo.participants.find(p => p.id === senderId || normalizarID(p.id) === idAlvoNorm);
+                        
+                        if (alvoEscondido) {
+                            try {
+                                await sockSniper.groupParticipantsUpdate(idGrupo, [alvoEscondido.id], "remove");
+                                banimentos++;
+                            } catch(e){} 
+                        }
+                    }
+
+                    console.log(`[🌍 ORDEM 66 CONCLUÍDA] Invasor eliminado de ${banimentos} grupo(s) simultaneamente!`);
+                } catch (error) {
+                    console.error(`[❌ FALHA] O Sniper precisa ser Admin para iniciar o Expurgo.`);
+                }
+            }
+        }
+    });
+}
+
+// =================================================================
+// FUNÇÃO DE ATRASO (EFEITO HOLLYWOOD DE CARREGAMENTO)
+// =================================================================
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// =================================================================
+// IGNIÇÃO SEQUENCIAL (MODO APRESENTAÇÃO CORPORATIVA)
+// =================================================================
+async function iniciarOperacaoAegis() {
+    console.clear(); 
+
+    // PALETA DE CORES DA EMPRESA (ANSI 256 Colors)
+    const corBranca = '\x1b[1;37m';       // Branco Brilhante
+    const corLaranja = '\x1b[38;5;208m';  // Laranja Neon / Corporativo
+    const corVerde = '\x1b[1;32m';        // Verde Status
+    const corVermelha = '\x1b[1;31m';     // Vermelho Alerta
+    const corCinza = '\x1b[90m';          // Cinza para bordas
+    const reset = '\x1b[0m';              // Reseta a cor
+
+    // ARTE ASCII (Blocos Maciços - Estilo AEGIS)
+    console.log(corBranca + `
+     █████╗ ███╗   ██╗████████╗██╗       ██╗  ██╗ █████╗  ██████╗ ██╗  ██╗███████╗██████╗ 
+    ██╔══██╗████╗  ██║╚══██╔══╝██║       ██║  ██║██╔══██╗██╔════╝ ██║ ██╔╝██╔════╝██╔══██╗
+    ███████║██╔██╗ ██║   ██║   ██║ █████╗███████║███████║██║      █████╔╝ █████╗  ██████╔╝
+    ██╔══██║██║╚██╗██║   ██║   ██║ ╚════╝██╔══██║██╔══██║██║      ██╔═██╗ ██╔══╝  ██╔══██╗
+    ██║  ██║██║ ╚████║   ██║   ██║       ██║  ██║██║  ██║╚██████╗ ██║  ██╗███████╗██║  ██║
+    ╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝       ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝` + 
+    corLaranja + `
+                    ██████╗ ██████╗  █████╗ ██████╗  ██████╗ 
+                    ██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔═══██╗
+                    ██████╦╝██████╔╝███████║██████╦╝██║   ██║
+                    ██╔══██╗██╔══██╗██╔══██║██╔══██╗██║   ██║
+                    ██████╦╝██║  ██║██║  ██║██████╦╝╚██████╔╝
+                    ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝ 
+    ` + reset);
+
+    console.log(corLaranja + `[ ⚠ ] CARREGANDO MOTOR DE DEFESA (AEGIS v5.9)` + reset + `\n`);
+    
+    // O BOOT SEQUENCE (Temática Laranja/Branco)
+    await sleep(600);
+    console.log(corBranca + `[BOOT] Inicializando Kernel Tático... ` + corLaranja + `[OK]` + reset);
+    await sleep(400);
+    console.log(corBranca + `[BOOT] Carregando Módulos de Criptografia (Signal Protocol)... ` + corLaranja + `[OK]` + reset);
+    await sleep(800);
+    console.log(corBranca + `[BOOT] Montando Banco de Dados (blacklist_aegis.json)... ` + corLaranja + `[OK]` + reset);
+    await sleep(300);
+    console.log(corBranca + `[BOOT] Injetando Type Armor e Deep Packet Inspection... ` + corLaranja + `[OK]` + reset);
+    await sleep(900);
+    console.log(corBranca + `[BOOT] Bypass de Rate Limit da Meta Concluído... ` + corLaranja + `[OK]` + reset);
+    await sleep(500);
+    console.log(corBranca + `[BOOT] Estabelecendo conexão contínua via WebSockets...\n` + reset);
+    await sleep(1000);
+
+    // O CÓDIGO REAL COMEÇA AQUI
+    carregarBlacklist(); 
+    
+    await iniciarSniper();  
+    
+    for (let i = 1; i <= QTD_ESPIOES; i++) {
+        await iniciarEspiao(i);
+    }
+    
+    // PAINEL DE STATUS FINAL
+    console.log(corCinza + `\n=================================================================` + reset);
+    console.log(corVerde + `[ 🟢 STATUS ] REDE DE SEGURANÇA MÁXIMA ONLINE.` + reset);
+    console.log(corLaranja + `[ 🔇 RADAR  ] Monitorando movimentações nos grupos` + reset);
+    console.log(corVermelha + `[ 💀 AMEAÇA ] Zero tolerância.` + reset);
+    console.log(corCinza + `=================================================================\n` + reset);
+}
+
+iniciarOperacaoAegis();
