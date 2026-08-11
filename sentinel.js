@@ -1,5 +1,5 @@
 // =====================================================================
-// 🛡️ MOTOR AEGIS 8.0: FULL ENV CONFIG & AUTO-PAIRING CLOUD EDITION
+// 🛡️ MOTOR AEGIS 8.1: CLOUD AUTO-PAIRING & SEQUENTIAL BOOT
 // =====================================================================
 require('dotenv').config();
 const { default: makeWASocket, useMultiFileAuthState, isJidGroup, fetchLatestBaileysVersion, DisconnectReason } = require('@whiskeysockets/baileys');
@@ -39,7 +39,6 @@ const WHITELIST_REMETENTES = process.env.WHITELIST_REMETENTES
     ? process.env.WHITELIST_REMETENTES.split(',').map(s => s.trim()) 
     : [];
 
-// 📱 NÚMEROS DAS TROPAS VIA ENV (Separados por vírgula ex: 551699...,551699...)
 const NUMEROS_SNIPERS = process.env.SNIPER_NUMBERS 
     ? process.env.SNIPER_NUMBERS.split(',').map(s => s.replace(/\D/g, '').trim()) 
     : [];
@@ -138,7 +137,7 @@ async function obterMetadataSegura(chatId) {
 // =================================================================
 async function iniciarSniper(indice) {
     const numeroSniper = NUMEROS_SNIPERS[indice - 1] || "";
-    console.log(`\n[*] [SNIPER 0${indice}] Verificando credenciais de artilharia (${numeroSniper || 'Sem número na ENV'})...`);
+    console.log(`\n[*] [SNIPER 0${indice}] Iniciando conexão para o número: ${numeroSniper || 'Não configurado'}...`);
     
     const authSniper = criarCredsOtimizado(await useMultiFileAuthState(`auth_sniper_${indice}`));
     return new Promise((resolve) => conectarSniperNode(indice, numeroSniper, authSniper, resolve));
@@ -146,7 +145,6 @@ async function iniciarSniper(indice) {
 
 async function conectarSniperNode(indice, numeroSniper, authSniper, resolve) {
     const { version } = await fetchLatestBaileysVersion();
-    let codigoSolicitado = false;
     
     const sockSniper = makeWASocket({
         version, auth: authSniper.state, printQRInTerminal: false, logger: pino({ level: 'silent' }), browser: ['Mac OS', 'Chrome', '121.0.0.0'], markOnlineOnConnect: true
@@ -155,26 +153,37 @@ async function conectarSniperNode(indice, numeroSniper, authSniper, resolve) {
     frotaSnipers[indice - 1] = sockSniper; 
     sockSniper.ev.on('creds.update', authSniper.saveCreds);
     
-    sockSniper.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        
-        // Se não estiver registrado, gera o código automaticamente usando a ENV e exibe nos logs do EasyPanel!
-        if ((qr || !sockSniper.authState.creds.registered) && numeroSniper && !codigoSolicitado && connection !== 'open') {
-            codigoSolicitado = true;
-            try { 
-                const code = await sockSniper.requestPairingCode(numeroSniper); 
-                console.log(`\n========================================`);
-                console.log(`[🔑] CÓDIGO DE PAREAMENTO DO SNIPER 0${indice}: ${code}`);
-                console.log(`========================================\n`);
-            } catch (err) {
-                codigoSolicitado = false; // Permite tentar novamente se falhar
-            }
+    // GERAÇÃO DE CÓDIGO FORA DO EVENTO DE UPDATE (Blindagem contra Deadlock)
+    if (!sockSniper.authState.creds.registered) {
+        if (numeroSniper) {
+            console.log(`[⏳] Solicitando código de pareamento para a Meta... (Aguarde 4 segundos)`);
+            setTimeout(async () => {
+                try {
+                    const code = await sockSniper.requestPairingCode(numeroSniper);
+                    console.log(`\n======================================================`);
+                    console.log(`[🔑] CÓDIGO DE PAREAMENTO (SNIPER 0${indice}): ${code}`);
+                    console.log(`======================================================\n`);
+                    console.log(`[!] Insira este código no WhatsApp do celular. O painel aguardará a sua confirmação...`);
+                } catch (err) {
+                    console.log(`[❌] Erro ao pedir código da Meta: ${err.message}. Reiniciando tentativa...`);
+                    setTimeout(() => conectarSniperNode(indice, numeroSniper, authSniper, resolve), 5000);
+                }
+            }, 4000);
+        } else {
+            console.log(`[❌] Erro: O Sniper 0${indice} não possui número configurado na Variável SNIPER_NUMBERS. Pulando.`);
+            return resolve(); // Libera o loop para o próximo
         }
+    }
 
+    sockSniper.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect } = update;
+        
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             if (statusCode !== DisconnectReason.loggedOut) {
-                conectarSniperNode(indice, numeroSniper, authSniper, resolve); 
+                setTimeout(() => conectarSniperNode(indice, numeroSniper, authSniper, resolve), 2000); 
+            } else {
+                console.log(`[💀] Sniper 0${indice} foi desconectado pelo celular.`);
             }
         }
         if (connection === 'open') {
@@ -279,7 +288,7 @@ async function conectarSniperNode(indice, numeroSniper, authSniper, resolve) {
 // =================================================================
 async function iniciarEspiao(indice) {
     const numeroSpotter = NUMEROS_ESPIOES[indice - 1] || "";
-    console.log(`\n[*] [ESPIÃO 0${indice}] Verificando credenciais (${numeroSpotter || 'Sem número na ENV'})...`);
+    console.log(`\n[*] [ESPIÃO 0${indice}] Iniciando infiltração para o número: ${numeroSpotter || 'Não configurado'}...`);
     
     const authSpotter = criarCredsOtimizado(await useMultiFileAuthState(`auth_spotter_${indice}`));
     return new Promise((resolve) => conectarEspiaoNode(indice, numeroSpotter, authSpotter, resolve));
@@ -287,7 +296,6 @@ async function iniciarEspiao(indice) {
 
 async function conectarEspiaoNode(indice, numeroSpotter, authSpotter, resolve) {
     const { version } = await fetchLatestBaileysVersion();
-    let codigoSolicitado = false;
     
     const sockEspiao = makeWASocket({
         version, auth: authSpotter.state, printQRInTerminal: false, logger: pino({ level: 'silent' }), browser: ['Mac OS', 'Chrome', '121.0.0.0'], markOnlineOnConnect: true
@@ -296,25 +304,34 @@ async function conectarEspiaoNode(indice, numeroSpotter, authSpotter, resolve) {
     frotaEspioes[indice - 1] = sockEspiao; 
     sockEspiao.ev.on('creds.update', authSpotter.saveCreds);
     
-    sockEspiao.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        
-        if ((qr || !sockEspiao.authState.creds.registered) && numeroSpotter && !codigoSolicitado && connection !== 'open') {
-            codigoSolicitado = true;
-            try { 
-                const code = await sockEspiao.requestPairingCode(numeroSpotter); 
-                console.log(`\n========================================`);
-                console.log(`[🔑] CÓDIGO DE PAREAMENTO DO ESPIÃO 0${indice}: ${code}`);
-                console.log(`========================================\n`);
-            } catch (err) {
-                codigoSolicitado = false;
-            }
+    if (!sockEspiao.authState.creds.registered) {
+        if (numeroSpotter) {
+            console.log(`[⏳] Solicitando código de pareamento para a Meta... (Aguarde 4 segundos)`);
+            setTimeout(async () => {
+                try {
+                    const code = await sockEspiao.requestPairingCode(numeroSpotter);
+                    console.log(`\n======================================================`);
+                    console.log(`[🔑] CÓDIGO DE PAREAMENTO (ESPIÃO 0${indice}): ${code}`);
+                    console.log(`======================================================\n`);
+                    console.log(`[!] Insira este código no WhatsApp do celular. O painel aguardará a sua confirmação...`);
+                } catch (err) {
+                    console.log(`[❌] Erro ao pedir código da Meta: ${err.message}. Reiniciando tentativa...`);
+                    setTimeout(() => conectarEspiaoNode(indice, numeroSpotter, authSpotter, resolve), 5000);
+                }
+            }, 4000);
+        } else {
+            console.log(`[❌] Erro: O Espião 0${indice} não possui número configurado na Variável SPOTTER_NUMBERS. Pulando.`);
+            return resolve();
         }
+    }
 
+    sockEspiao.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect } = update;
+        
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             if (statusCode !== DisconnectReason.loggedOut) {
-                conectarEspiaoNode(indice, numeroSpotter, authSpotter, resolve); 
+                setTimeout(() => conectarEspiaoNode(indice, numeroSpotter, authSpotter, resolve), 2000); 
             }
         }
         if (connection === 'open') {
@@ -500,7 +517,7 @@ async function iniciarOperacaoAegis() {
                     ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝ 
     ` + reset);
 
-    console.log(corLaranja + `[ ⚠ ] CARREGANDO MOTOR DE DEFESA (AEGIS v8.0 FULL ENV)` + reset + `\n`);
+    console.log(corLaranja + `[ ⚠ ] CARREGANDO MOTOR DE DEFESA (AEGIS v8.1 AUTO-PAIRING)` + reset + `\n`);
     
     await sleep(600);
     console.log(corBranca + `[BOOT] Inicializando Kernel Tático... ` + corLaranja + `[OK]` + reset);
@@ -509,10 +526,12 @@ async function iniciarOperacaoAegis() {
     carregarBancosDeDadosParaRAM();
     
     console.log(corBranca + `[BOOT] Injetando Bancos de Dados na Memória RAM (Zero Disk I/O)... ` + corLaranja + `[OK]` + reset);
+    if (NUMEROS_SNIPERS.length === 0) console.log(corVermelha + `[⚠️] ALERTA: NENHUM SNIPER CONFIGURADO NA ENV!` + reset);
+    
     await sleep(800);
     console.log(corBranca + `[BOOT] Configurando Sistema Ativo-Passivo (Standby)... ` + corLaranja + `[OK]` + reset);
     await sleep(300);
-    console.log(corBranca + `[BOOT] Injetando Debounce e Configurações de Nuvem... ` + corLaranja + `[OK]` + reset);
+    console.log(corBranca + `[BOOT] Injetando Delay Anti-Bloqueio (Auto-Pairing)... ` + corLaranja + `[OK]` + reset);
     await sleep(900);
     console.log(corBranca + `[BOOT] Conectando Artilharia Pesada (WebSockets)...\n` + reset);
     await sleep(1000);
@@ -528,8 +547,8 @@ async function iniciarOperacaoAegis() {
     console.log(corBranca + `[BOOT] Aguardando calibração do rádio (5 segundos)...` + reset);
     await sleep(5000);
 
-    if (GRUPO_DE_ALERTAS && GRUPO_DE_ALERTAS.includes('@g.us')) {
-        const msgBoot = `*🟢 SISTEMA ANTI-HACKER BRABO ONLINE*\n\n_Centro de Comando localizado e conectado com sucesso (Full ENV)._ 🛡️`;
+    if (GRUPO_DE_ALERTAS && GRUPO_DE_ALERTAS.includes('@g.us') && frotaSnipers.length > 0) {
+        const msgBoot = `*🟢 SISTEMA ANTI-HACKER BRABO ONLINE*\n\n_Centro de Comando localizado e conectado com sucesso (Auto-Pairing Edition)._ 🛡️`;
         
         (async () => {
             for (const sniper of frotaSnipers) {
