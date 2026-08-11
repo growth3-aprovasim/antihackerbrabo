@@ -1,10 +1,9 @@
 // =====================================================================
-// 🛡️ MOTOR AEGIS 7.8: CLOUD EDITION (ENV CONFIG & NON-BLOCKING BOOT)
+// 🛡️ MOTOR AEGIS 8.0: FULL ENV CONFIG & AUTO-PAIRING CLOUD EDITION
 // =====================================================================
 require('dotenv').config();
 const { default: makeWASocket, useMultiFileAuthState, isJidGroup, fetchLatestBaileysVersion, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-const readline = require('readline');
 const fs = require('fs'); 
 
 // ⏱️ RELÓGIO MESTRE ABSOLUTO
@@ -33,27 +32,23 @@ console.info = function (...args) { if (!filtroSilenciador(args)) consoleInfoOri
 process.on('uncaughtException', err => console.error('\n[💀 ERRO FATAL]', err));
 process.on('unhandledRejection', err => console.error('\n[💀 REJEIÇÃO]', err));
 
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-const question = (text) => new Promise((resolve) => rl.question(text, resolve));
-
 // =================================================================
-// ⚙️ PAINEL DE CONTROLE (VIA VARIÁVEIS DE AMBIENTE)
+// ⚙️ PAINEL DE CONTROLE (VARIÁVEIS DE AMBIENTE)
 // =================================================================
 const WHITELIST_REMETENTES = process.env.WHITELIST_REMETENTES 
     ? process.env.WHITELIST_REMETENTES.split(',').map(s => s.trim()) 
-    : [
-        '5516992110085', '5516992082684', '5516992093303', '5516992096761',
-        '5516992099841', '5516992112872', '5516992091315', '5516992712899',
-        '5516994602791', '5516992091850', '5516992094260', '5516994084569',
-        '5516994081948', '5516992091353', '5516992987915', '5516991358541',
-        '5516997263099', '5516992274378', '5516992093310', '5516993941350',
-        '5516994307722'
-    ];
+    : [];
 
-const QTD_SNIPERS = parseInt(process.env.QTD_SNIPERS || '3', 10); 
-const QTD_ESPIOES = parseInt(process.env.QTD_ESPIOES || '2', 10); 
+// 📱 NÚMEROS DAS TROPAS VIA ENV (Separados por vírgula ex: 551699...,551699...)
+const NUMEROS_SNIPERS = process.env.SNIPER_NUMBERS 
+    ? process.env.SNIPER_NUMBERS.split(',').map(s => s.replace(/\D/g, '').trim()) 
+    : [];
 
-const GRUPO_DE_ALERTAS = process.env.GRUPO_DE_ALERTAS || "120363410197031193@g.us"; 
+const NUMEROS_ESPIOES = process.env.SPOTTER_NUMBERS 
+    ? process.env.SPOTTER_NUMBERS.split(',').map(s => s.replace(/\D/g, '').trim()) 
+    : [];
+
+const GRUPO_DE_ALERTAS = process.env.GRUPO_DE_ALERTAS || ""; 
 
 const ARQUIVO_BLACKLIST = './blacklist_aegis.json';
 const ARQUIVO_STATS = './estatisticas_aegis.json'; 
@@ -62,7 +57,6 @@ const cacheGrupos = {};
 const pendingMetadata = {}; 
 const travasDeRedundancia = new Set(); 
 
-// 🧠 BANCOS DE DADOS EM MEMÓRIA RAM
 let cacheBlacklist = [];
 let cacheEstatisticas = { total_mensagens_apagadas: 0, total_banimentos: 0, hackers_bloqueados: [], grupos_protegidos: [] };
 
@@ -140,20 +134,13 @@ async function obterMetadataSegura(chatId) {
 }
 
 // =================================================================
-// PASSO 1: FÁBRICA DE SNIPERS 
+// PASSO 1: FÁBRICA DE SNIPERS (AUTOMATIZADA VIA ENV)
 // =================================================================
 async function iniciarSniper(indice) {
-    console.log(`\n[*] [SNIPER 0${indice}] Verificando credenciais de artilharia...`);
+    const numeroSniper = NUMEROS_SNIPERS[indice - 1] || "";
+    console.log(`\n[*] [SNIPER 0${indice}] Verificando credenciais de artilharia (${numeroSniper || 'Sem número na ENV'})...`);
+    
     const authSniper = criarCredsOtimizado(await useMultiFileAuthState(`auth_sniper_${indice}`));
-    let numeroSniper = "";
-
-    if (!authSniper.state.creds.registered) {
-        numeroSniper = await question(`\n[?] NOVO LOGIN. Digite o NÚMERO DO SNIPER 0${indice} (Com 55!): `);
-        numeroSniper = numeroSniper.replace(/\D/g, '');
-    } else {
-        console.log(`[*] [SNIPER 0${indice}] Chaves salvas encontradas. Conectando...`);
-    }
-
     return new Promise((resolve) => conectarSniperNode(indice, numeroSniper, authSniper, resolve));
 }
 
@@ -171,12 +158,17 @@ async function conectarSniperNode(indice, numeroSniper, authSniper, resolve) {
     sockSniper.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
         
-        if (qr && !sockSniper.authState.creds.registered && !codigoSolicitado) {
+        // Se não estiver registrado, gera o código automaticamente usando a ENV e exibe nos logs do EasyPanel!
+        if ((qr || !sockSniper.authState.creds.registered) && numeroSniper && !codigoSolicitado && connection !== 'open') {
             codigoSolicitado = true;
             try { 
                 const code = await sockSniper.requestPairingCode(numeroSniper); 
-                console.log(`\n[🔑] CÓDIGO DO SNIPER 0${indice}: ${code}`); 
-            } catch (err) {}
+                console.log(`\n========================================`);
+                console.log(`[🔑] CÓDIGO DE PAREAMENTO DO SNIPER 0${indice}: ${code}`);
+                console.log(`========================================\n`);
+            } catch (err) {
+                codigoSolicitado = false; // Permite tentar novamente se falhar
+            }
         }
 
         if (connection === 'close') {
@@ -191,7 +183,6 @@ async function conectarSniperNode(indice, numeroSniper, authSniper, resolve) {
         }
     });
 
-    // 🕵️ COMANDO C2 (!idgrupo) 
     sockSniper.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
         
@@ -237,7 +228,6 @@ async function conectarSniperNode(indice, numeroSniper, authSniper, resolve) {
         }
     });
 
-    // 🛑 CATRACA DE FERRO
     sockSniper.ev.on('group-participants.update', async (evento) => {
         if (evento.action === 'add') {
             for (let novato of evento.participants) {
@@ -285,20 +275,13 @@ async function conectarSniperNode(indice, numeroSniper, authSniper, resolve) {
 }
 
 // =================================================================
-// PASSO 2: FÁBRICA DE OLHEIROS
+// PASSO 2: FÁBRICA DE ESPIÕES (AUTOMATIZADA VIA ENV)
 // =================================================================
 async function iniciarEspiao(indice) {
-    console.log(`\n[*] [ESPIÃO 0${indice}] Verificando credenciais e iniciando infiltração...`);
+    const numeroSpotter = NUMEROS_ESPIOES[indice - 1] || "";
+    console.log(`\n[*] [ESPIÃO 0${indice}] Verificando credenciais (${numeroSpotter || 'Sem número na ENV'})...`);
+    
     const authSpotter = criarCredsOtimizado(await useMultiFileAuthState(`auth_spotter_${indice}`));
-    let numeroSpotter = "";
-
-    if (!authSpotter.state.creds.registered) {
-        numeroSpotter = await question(`\n[?] NOVO LOGIN. Digite o NÚMERO DO ESPIÃO 0${indice} (Com 55!): `);
-        numeroSpotter = numeroSpotter.replace(/\D/g, '');
-    } else {
-        console.log(`[*] [ESPIÃO 0${indice}] Chaves salvas encontradas. Conectando...`);
-    }
-
     return new Promise((resolve) => conectarEspiaoNode(indice, numeroSpotter, authSpotter, resolve));
 }
 
@@ -316,13 +299,18 @@ async function conectarEspiaoNode(indice, numeroSpotter, authSpotter, resolve) {
     sockEspiao.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
         
-        if (qr && !sockEspiao.authState.creds.registered && !codigoSolicitado) {
+        if ((qr || !sockEspiao.authState.creds.registered) && numeroSpotter && !codigoSolicitado && connection !== 'open') {
             codigoSolicitado = true;
             try { 
                 const code = await sockEspiao.requestPairingCode(numeroSpotter); 
-                console.log(`\n[🔑] CÓDIGO DO ESPIÃO 0${indice}: ${code}`); 
-            } catch (err) {}
+                console.log(`\n========================================`);
+                console.log(`[🔑] CÓDIGO DE PAREAMENTO DO ESPIÃO 0${indice}: ${code}`);
+                console.log(`========================================\n`);
+            } catch (err) {
+                codigoSolicitado = false;
+            }
         }
+
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             if (statusCode !== DisconnectReason.loggedOut) {
@@ -335,9 +323,6 @@ async function conectarEspiaoNode(indice, numeroSpotter, authSpotter, resolve) {
         }
     });
 
-    // =================================================================
-    // 🛡️ INTEGRAÇÃO TÁTICA: COMBATE ATIVO-PASSIVO
-    // =================================================================
     sockEspiao.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return; 
 
@@ -510,12 +495,12 @@ async function iniciarOperacaoAegis() {
                     ██████╗ ██████╗  █████╗ ██████╗  ██████╗ 
                     ██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔═══██╗
                     ██████╦╝██████╔╝███████║██████╦╝██║   ██║
-                    ██╔══██╗██╔══██╗██╔══██║██╔══██║██║   ██║
+                    ██╔══██╗██╔══██╗██╔══██║██╔══██╗██║   ██║
                     ██████╦╝██║  ██║██║  ██║██████╦╝╚██████╔╝
                     ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝ 
     ` + reset);
 
-    console.log(corLaranja + `[ ⚠ ] CARREGANDO MOTOR DE DEFESA (AEGIS v7.8 CLOUD EDITION)` + reset + `\n`);
+    console.log(corLaranja + `[ ⚠ ] CARREGANDO MOTOR DE DEFESA (AEGIS v8.0 FULL ENV)` + reset + `\n`);
     
     await sleep(600);
     console.log(corBranca + `[BOOT] Inicializando Kernel Tático... ` + corLaranja + `[OK]` + reset);
@@ -527,25 +512,24 @@ async function iniciarOperacaoAegis() {
     await sleep(800);
     console.log(corBranca + `[BOOT] Configurando Sistema Ativo-Passivo (Standby)... ` + corLaranja + `[OK]` + reset);
     await sleep(300);
-    console.log(corBranca + `[BOOT] Injetando Debounce anti-EMFILE e Cloud Env... ` + corLaranja + `[OK]` + reset);
+    console.log(corBranca + `[BOOT] Injetando Debounce e Configurações de Nuvem... ` + corLaranja + `[OK]` + reset);
     await sleep(900);
     console.log(corBranca + `[BOOT] Conectando Artilharia Pesada (WebSockets)...\n` + reset);
     await sleep(1000);
 
-    for (let i = 1; i <= QTD_SNIPERS; i++) {
+    for (let i = 1; i <= NUMEROS_SNIPERS.length; i++) {
         await iniciarSniper(i);
     }
     
-    for (let i = 1; i <= QTD_ESPIOES; i++) {
+    for (let i = 1; i <= NUMEROS_ESPIOES.length; i++) {
         await iniciarEspiao(i);
     }
 
     console.log(corBranca + `[BOOT] Aguardando calibração do rádio (5 segundos)...` + reset);
     await sleep(5000);
 
-    // 🚀 ENVIO NÃO-BLOQUEANTE DO C2 (Protegido contra travamento na nuvem)
     if (GRUPO_DE_ALERTAS && GRUPO_DE_ALERTAS.includes('@g.us')) {
-        const msgBoot = `*🟢 SISTEMA ANTI-HACKER BRABO ONLINE*\n\n_Centro de Comando localizado e conectado com sucesso (Cloud Edition)._ 🛡️`;
+        const msgBoot = `*🟢 SISTEMA ANTI-HACKER BRABO ONLINE*\n\n_Centro de Comando localizado e conectado com sucesso (Full ENV)._ 🛡️`;
         
         (async () => {
             for (const sniper of frotaSnipers) {
@@ -564,7 +548,7 @@ async function iniciarOperacaoAegis() {
 
     console.log(corCinza + `\n=================================================================` + reset);
     console.log(corVerde + `[ 🟢 STATUS ] REDE DE SEGURANÇA MÁXIMA ONLINE.` + reset);
-    console.log(corLaranja + `[ 🔇 RADAR  ] RAM Cache, Ordem 66, Alertas C2 e Cloud Config Ativados.` + reset);
+    console.log(corLaranja + `[ 🔇 RADAR  ] RAM Cache, Ordem 66, Alertas C2 e ENV Ativados.` + reset);
     console.log(corVermelha + `[ 💀 AMEAÇA ] Zero tolerância. O primeiro erro será o último.` + reset);
     console.log(corCinza + `=================================================================\n` + reset);
 }
